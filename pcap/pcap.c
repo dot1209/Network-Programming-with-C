@@ -6,6 +6,7 @@
 #include <netinet/ip.h>
 #include <netinet/in.h>
 #include <netinet/tcp.h>
+#include <netinet/udp.h>
 #include <arpa/inet.h>
 
 int i = 0;
@@ -22,29 +23,32 @@ int main(int argc, char *argv[]) {
 	pcap_t *descr;
 	char errbuf[PCAP_ERRBUF_SIZE];
 
-	// open capture file for offline processing
-	descr = pcap_open_offline("tcp.pcapng", errbuf);
+	if(strcmp(argv[1], "-r") == 0)	{
+		// open capture file for offline processing
+		descr = pcap_open_offline(argv[2], errbuf);
 
-	if(descr == NULL) {
+		if(descr == NULL) {
 
-		printf("pcap_open_live() failed: %s\n", errbuf);
-		return 1;
-	}
+			printf("pcap_open_live() failed: %s\n", errbuf);
+			return 1;
+		}
 
-	// start packet processing loop, just like live capture
-	if(pcap_loop(descr, 0, packetHandler, NULL) < 0) {
+		// start packet processing loop, just like live capture
+		if(pcap_loop(descr, 0, packetHandler, NULL) < 0) {
 
-		printf("pcap_loop() failed: %s\n", pcap_geterr(descr));
-		return 1;
-	}
+			printf("pcap_loop() failed: %s\n", pcap_geterr(descr));
+			return 1;
+		}
 
-	printf("total %d packet\n", ip);
-	printf("capture %d finished\n", i);
+		printf("\n---------- summarize ----------\n");
+		printf("total %d packet\n", ip);
+		printf("capture %d finished\n", i);
 
-	int a;
-	for(a = 0; a < i; a++)	{
-		if(table[a] > 0)
-			printf("%s <---> %s : %d\n", sip[a], dip[a], table[a]);
+		int a;
+		for(a = 0; a < i; a++)	{
+			if(table[a] > 0)
+				printf("%s <---> %s : %d\n", sip[a], dip[a], table[a]);
+		}
 	}
 
 	return 0;
@@ -55,18 +59,35 @@ void packetHandler(u_char *userData, const struct pcap_pkthdr* pkthdr, const u_c
 	const struct ether_header* ethernetHeader;
 	const struct ip* ipHeader;
 	const struct tcphdr* tcpHeader;
+	const struct udphdr* udpHeader;
+
+	const struct pcap_pkthdr *hdr = pkthdr;	
+
 	char sourceIp[INET_ADDRSTRLEN];
 	char destIp[INET_ADDRSTRLEN];
-	const struct pcap_pkthdr *hdr = pkthdr;	
 
 	u_int sourcePort, destPort;
 	u_char *data;
 	int dataLength = 0;
 
+	u_char *saddr, *daddr;
+
 	int j;
 	int flag = 0;
-
+	
 	ethernetHeader = (struct ether_header*)packet;
+	
+//	if (ntohs(ethernetHeader->ether_type) == ETHERTYPE_ARP)	{
+
+//		printf("ETHERTYPE_ARP\n");
+//		return 0;
+//	}
+
+//	else if (ntohs(ethernetHeader->ether_type) == ETHERTYPE_PUP)	{
+
+//		printf("ETHERTYPE_PUP\n");
+//		return ;
+//	}
 
 	if (ntohs(ethernetHeader->ether_type) == ETHERTYPE_IP) {
 
@@ -112,25 +133,58 @@ void packetHandler(u_char *userData, const struct pcap_pkthdr* pkthdr, const u_c
 
 			tcpHeader = (struct tcphdr*)(packet + sizeof(struct ether_header) + sizeof(struct ip));
 
-			sourcePort = ntohs(tcpHeader->source);
-			destPort = ntohs(tcpHeader->dest);
-
-			data = (u_char*)(packet + sizeof(struct ether_header) + sizeof(struct ip) + sizeof(struct tcphdr));
-			dataLength = pkthdr->len - (sizeof(struct ether_header) + sizeof(struct ip) + sizeof(struct tcphdr));
-
+			sourcePort = ntohs(tcpHeader -> source);
+			destPort = ntohs(tcpHeader -> dest);
+			
 			printf("========== TCP ==========\n");
-			printf("%s:%d -> %s:%d\n", sourceIp, sourcePort, destIp, destPort);
-			printf("Recieved at ... %s", ctime((const time_t*)&(hdr->ts.tv_sec)));
 		}
 
 		if (ipHeader->ip_p == IPPROTO_UDP)	{
 
-			sourcePort = ntohs(tcpHeader -> source);
-			destPort = ntohs(tcpHeader -> dest);
+			udpHeader = (struct udphdr*)(packet + sizeof(struct ether_header) + sizeof(struct ip));
+
+			sourcePort = ntohs(udpHeader -> source);
+			destPort = ntohs(udpHeader -> dest);
 
 			printf("========== UDP ==========\n");
-			printf("%s:%d -> %s:%d\n", sourceIp, sourcePort, destIp, destPort);
-			printf("Recieved at ... %s", ctime((const time_t*)&(hdr->ts.tv_sec)));
 		}
+
+		if (ipHeader->ip_p == 1)
+			printf("========== ICMP ==========\n");
+
+		if (ipHeader->ip_p == 27)
+			printf("========== RDP ==========\n");
+
+		if (ipHeader->ip_p == 73)
+			printf("========== RSPF ==========\n");
+
+		if (ipHeader->ip_p == 89)
+			printf("========== OSPF ==========\n");
+
+		int len;
+		len = ETHER_ADDR_LEN;
+		saddr = ethernetHeader -> ether_shost;
+		printf("%-12s", "source MAC: ");
+		while(len-- > 1)
+			printf("%x:", *saddr++);
+		printf("%x\n", *saddr);
+
+		len = ETHER_ADDR_LEN;
+		daddr = ethernetHeader -> ether_dhost;
+		printf("%-12s", "dest MAC: ");
+		while(len-- > 1)
+			printf("%x:", *daddr++);
+		printf("%x\n", *daddr);
+
+		printf("%-6s", "From: ");
+		printf("%-18s", sourceIp);
+		printf("port: %d\n", sourcePort);
+		
+		printf("%-6s", "To: ");
+		printf("%-18s", destIp);
+		printf("port: %d\n", destPort);
+
+//		printf("%s:%d -> %s:%d\n", sourceIp, sourcePort, destIp, destPort);
+		printf("Recieved at ... %s", ctime((const time_t*)&(hdr->ts.tv_sec)));
 	}
 }
